@@ -131,13 +131,13 @@
       <p><b>R</b> is profit in units of risk. +1.5R means a trade hit TP1. -1R means it hit the stop. <b>Avg R</b> is the average per trade.</p>
       <p><b>Chance R</b> is what random entries with the same stops and targets earned on this market. On Boom and Crash that is often negative, because spikes jump past stops.</p>
       <p><b>Edge</b> is Avg R minus Chance R. <b>z</b> says how unlikely that edge is by luck. Below 2 is noise.</p>
-      <p><b>Score</b> runs from 0 to 100. About 27 is chance level, 65 or more is promising, and 85 or more needs a z of 3 with a positive edge in both halves of the history. Treat even a high score as something to forward test on demo, not a promise.</p>
+      <p><b>Score</b> runs from 0 to 100. It is corrected for picking the best of 13 strategies, because testing many and keeping the winner makes luck look like skill. On purely random prices fewer than 3 in 100 markets reach 65 (Promising) and about 3 in 1,000 reach 85 (Strong). Treat even a high score as something to forward test, not a promise.</p>
     </details>
   </section>
 
   <!-- ALERTS -->
   <section class="view" id="view-alerts" data-view="alerts" hidden>
-    <div class="glass note warn">Phone alerts fire only while SynthScope is open. Phase 2 adds a 24/7 server that sends alerts through ntfy even when your phone is locked.</div>
+    <div class="glass note warn">Phone alerts fire only while SynthScope is open. For alerts while your phone is locked, set up the 24/7 scanner on GitHub, which sends them through the ntfy app.</div>
     <div class="controls">
       <button class="btn" id="notifBtn" type="button">Allow notifications</button>
       <label class="switch"><input type="checkbox" id="optSound"><span class="track"></span>Sound</label>
@@ -184,8 +184,8 @@
     <div class="glass panel">
       <h2 class="h">Coming next</h2>
       <ul class="roadmap">
-        <li><b>Phase 2:</b> 24/7 Oracle Cloud scanner, ntfy alerts, and automatic paper trading on your Deriv demo account</li>
-        <li><b>Phase 3:</b> on-phone neural network, strategy evolver, and Gemini explanations of each signal</li>
+        <li><b>Phase 2:</b> 24/7 scanner on GitHub Actions with ntfy alerts (ready, see the README), then automatic paper trading on your Deriv demo account</li>
+        <li><b>Phase 3:</b> on-phone neural network and strategy evolver</li>
       </ul>
     </div>
     <div class="glass note">
