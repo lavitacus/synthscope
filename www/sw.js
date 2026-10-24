@@ -1,6 +1,6 @@
 /* Caches the app shell so SynthScope opens fast and works on flaky connections.
    Live prices always come from Deriv over WebSocket, which this does not touch. */
-const CACHE = 'synthscope-v1.0.0';
+const CACHE = 'synthscope-v2.0.0';
 const SHELL = [
   './', 'index.html', 'css/app.css', 'js/indicators.js', 'js/strategies.js', 'js/deriv.js', 'js/app.js',
   'vendor/lightweight-charts.standalone.production.js', 'manifest.webmanifest',
