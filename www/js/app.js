@@ -1,7 +1,7 @@
 /* SynthScope 2: Smart Scan, live trade plans, strategy library, backtests and alerts. */
 (function () {
   'use strict';
-  const VERSION = '2.0.0';
+  const VERSION = '2.1.0';
   const $ = id => document.getElementById(id);
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -483,7 +483,7 @@
       try {
         const cs = await client.candles(s, g, count);
         const S = Strat.compute(cs), opts = Object.assign(engineOpts(s), { maxHold: hold });
-        for (const st of Strat.library(settings.threshold)) { const r = Strat.backtest(S, st, opts); if (r) results.push(Object.assign(r, { sym: s })); }
+        for (const r of Strat.recommend(S, opts)) results.push(Object.assign(r, { sym: s }));
       } catch (e) { console.warn(s, e.message); }
       done++; $('testBar').style.width = (done / list.length * 100) + '%';
       await sleep(0);
@@ -494,7 +494,7 @@
 
   function renderTest(results, multi, g, hold) {
     if (!results.length) { $('testMeta').textContent = 'No results. The market may not have enough history on this timeframe.'; return; }
-    const rows = (multi ? results.filter(r => r.trades >= Strat.MIN_TRADES) : results).sort((a, b) => b.score - a.score || b.z - a.z).slice(0, multi ? 25 : 99);
+    const rows = (multi ? results.filter(r => r.trades >= Strat.MIN_TRADES) : results).sort((a, b) => b.score - a.score || (b.zAdj || b.z) - (a.zAdj || a.z)).slice(0, multi ? 25 : 99);
     const sgn = v => (v > 0 ? '+' : '') + v.toFixed(2);
     $('testTable').querySelector('tbody').innerHTML = rows.map(r => `<tr>
       <td><div class="r-name">${esc(r.name)}</div>${multi ? `<div class="r-sub">${esc(nameOf(r.sym))}</div>` : ''}</td>
@@ -504,11 +504,11 @@
       <td class="num">${r.score}</td><td><span class="verdict v-${r.verdict.code}">${esc(r.verdict.label)}</span></td></tr>`).join('');
     $('testWrap').hidden = false;
     const tests = results.filter(r => r.trades >= Strat.MIN_TRADES).length;
-    const edges = results.filter(r => r.verdict.code === 'edge').length, luck = tests * 0.00135;
+    const edges = results.filter(r => r.verdict.code === 'edge').length, luck = (tests / 13) * 0.00135; // scores are already corrected within each market
     $('testMeta').textContent = multi
       ? `Tested ${tests} strategy and market pairs on ${tfLabel(g)} candles with a ${hold}-candle max hold. Showing the top 25.`
       : `${nameOf(results[0].sym)}, ${results[0].candles.toLocaleString()} candles of ${tfLabel(g)}, ${hold}-candle max hold.`;
-    $('testNote').innerHTML = `<b>${edges}</b> result${edges === 1 ? '' : 's'} passed the Possible edge test. With ${tests} tests, about <b>${luck < 0.1 ? luck.toFixed(2) : luck.toFixed(1)}</b> would pass by pure luck. ` +
+    $('testNote').innerHTML = `<b>${edges}</b> result${edges === 1 ? '' : 's'} passed the Possible edge test. With ${Math.max(1, Math.round(tests / 13))} market${tests > 13 ? 's' : ''} tested, about <b>${luck < 0.1 ? luck.toFixed(2) : luck.toFixed(1)}</b> would pass by pure luck. ` +
       (edges === 0 ? 'Nothing here beats chance, which is what a random market should show.' : edges <= Math.max(1, luck * 3) ? 'That is close to what luck alone produces. Recheck it on another timeframe or later data before trusting it.' : 'That is more than luck would explain. Recheck it on fresh data, then forward test it with alerts before trading it.');
     $('testNote').hidden = false;
   }
