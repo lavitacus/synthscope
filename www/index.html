@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SynthScope</title>
+<meta name="description" content="Signals and backtests for Deriv synthetic indices">
+<meta name="theme-color" content="#0e1418">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chivo:wght@400;600;800&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand"><span class="brand-mark" aria-hidden="true"></span>SynthScope</div>
+  <button class="conn" id="connBtn" type="button" aria-label="Connection status"><span class="dot" id="connDot"></span><span id="connText">Connecting</span></button>
+</header>
+
+<main id="views">
+
+  <!-- SCAN -->
+  <section class="view" id="view-scan" data-view="scan">
+    <div class="controls">
+      <label class="field"><span>Timeframe</span><select id="scanTf"></select></label>
+      <label class="field"><span>Market group</span><select id="scanGroup"><option value="">All synthetic markets</option></select></label>
+    </div>
+    <div class="controls">
+      <button class="btn primary" id="scanBtn" type="button">Scan markets</button>
+      <label class="check"><input type="checkbox" id="scanAuto"> Rescan every candle</label>
+      <label class="check"><input type="checkbox" id="scanOnlySignals"> Signals only</label>
+    </div>
+    <div class="progress" id="scanProgress" hidden><div class="bar" id="scanBar"></div><span id="scanProgText"></span></div>
+    <p class="meta" id="scanMeta">Tap Scan to rank every synthetic market by its combined signal.</p>
+    <ol class="rows" id="scanList"></ol>
+  </section>
+
+  <!-- CHART -->
+  <section class="view" id="view-chart" data-view="chart" hidden>
+    <div class="controls">
+      <label class="field grow"><span>Market</span><select id="chartSym"></select></label>
+      <label class="field"><span>Timeframe</span><select id="chartTf"></select></label>
+    </div>
+    <div class="signal-card" id="sigCard">
+      <div class="sig-main">
+        <span class="pill big" id="sigPill">WAIT</span>
+        <div class="sig-score"><span class="num" id="sigScore">0</span><span class="unit">score</span></div>
+      </div>
+      <div class="scorebar"><span class="zero"></span><span class="fill" id="sigFill"></span></div>
+      <dl class="facts">
+        <div><dt>Price</dt><dd class="num" id="sigPrice">-</dd></div>
+        <div><dt>Market</dt><dd id="sigRegime">-</dd></div>
+        <div><dt>ATR 14</dt><dd class="num" id="sigAtr">-</dd></div>
+        <div><dt>Last signal</dt><dd id="sigLast">-</dd></div>
+      </dl>
+    </div>
+    <div class="chart-wrap"><div id="chart"></div></div>
+    <p class="legend"><span class="sw sw-ema21"></span>EMA 21 <span class="sw sw-ema200"></span>EMA 200 <span class="sw sw-st"></span>Supertrend. Arrows mark combined signals on closed candles.</p>
+    <div class="controls">
+      <button class="btn" id="watchBtn" type="button">Add to alerts</button>
+      <button class="btn" id="mtfBtn" type="button">Check all timeframes</button>
+      <button class="btn" id="chartTestBtn" type="button">Backtest this market</button>
+    </div>
+    <h2 class="h">Indicator breakdown</h2>
+    <ul class="parts" id="partsList"></ul>
+    <div id="mtfBox" hidden>
+      <h2 class="h">All timeframes</h2>
+      <ul class="parts" id="mtfList"></ul>
+    </div>
+  </section>
+
+  <!-- BACKTEST -->
+  <section class="view" id="view-test" data-view="test" hidden>
+    <div class="controls">
+      <label class="field grow"><span>Market</span><select id="testSym"></select></label>
+      <label class="field"><span>Timeframe</span><select id="testTf"></select></label>
+    </div>
+    <div class="controls">
+      <label class="field"><span>History</span>
+        <select id="testCount"><option value="1000">1,000 candles</option><option value="2500">2,500 candles</option><option value="5000" selected>5,000 candles</option></select></label>
+      <label class="field"><span>Hold for</span>
+        <select id="testHorizon"><option value="1">1 candle</option><option value="3">3 candles</option><option value="5" selected>5 candles</option><option value="10">10 candles</option><option value="20">20 candles</option></select></label>
+    </div>
+    <div class="controls">
+      <button class="btn primary" id="testBtn" type="button">Run backtest</button>
+    </div>
+    <div class="progress" id="testProgress" hidden><div class="bar" id="testBar"></div><span id="testProgText"></span></div>
+    <p class="meta" id="testMeta">Tests each indicator on Deriv's real price history and compares it with chance.</p>
+    <div class="table-wrap"><table class="results" id="testTable" hidden>
+      <thead><tr><th>Strategy</th><th>Trades</th><th>Win</th><th>Chance</th><th>Edge</th><th>Avg move</th><th>z</th><th>Verdict</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+    <div id="testNote" class="note" hidden></div>
+    <details class="explain">
+      <summary>How to read these results</summary>
+      <p><b>Win</b> is how often the price moved your way after the hold time. <b>Chance</b> is how often a random entry in the same direction would have won on this market. On Boom and Crash this is far from 50%, because price drifts between spikes.</p>
+      <p><b>Edge</b> is Win minus Chance. <b>Avg move</b> is the average result per trade in ATR units. A strategy can win often and still lose money if the losses are big, which is the usual Boom/Crash trap.</p>
+      <p><b>z</b> measures how unlikely the edge is by luck. Below 2 is noise. Because you are testing many strategies and markets, only trust z of 3 or more that also shows a positive edge in both halves of the history. That is the <b>Possible edge</b> verdict, and it still needs forward testing on demo.</p>
+    </details>
+  </section>
+
+  <!-- ALERTS -->
+  <section class="view" id="view-alerts" data-view="alerts" hidden>
+    <div class="note warn">Alerts fire only while SynthScope is open. Keep the screen on for best results.</div>
+    <div class="controls">
+      <button class="btn" id="notifBtn" type="button">Allow notifications</button>
+      <label class="check"><input type="checkbox" id="optSound" checked> Sound</label>
+      <label class="check"><input type="checkbox" id="optVibrate" checked> Vibrate</label>
+      <label class="check"><input type="checkbox" id="optAwake"> Keep screen on</label>
+    </div>
+    <h2 class="h">Watching</h2>
+    <p class="meta" id="watchEmpty">Nothing yet. Open a market in Chart and tap Add to alerts, or tap the star on a scan row.</p>
+    <ul class="parts" id="watchList"></ul>
+    <h2 class="h">Alert history</h2>
+    <ul class="log" id="alertLog"></ul>
+    <button class="btn ghost" id="clearLog" type="button">Clear history</button>
+  </section>
+
+  <!-- SETTINGS -->
+  <section class="view" id="view-settings" data-view="settings" hidden>
+    <h2 class="h">Signal</h2>
+    <label class="field"><span>Combined score needed for BUY or SELL: <b id="thrVal">50</b></span>
+      <input type="range" id="optThreshold" min="30" max="90" step="5" value="50"></label>
+    <p class="meta">Higher means fewer, stricter signals. The score runs from -100 (all tools say sell) to 100 (all say buy).</p>
+
+    <h2 class="h">Connection</h2>
+    <label class="field"><span>Deriv server</span>
+      <select id="optEndpoint">
+        <option value="auto">Automatic</option>
+        <option value="new">Deriv API (public feed)</option>
+        <option value="legacy">Deriv API v3 (needs App ID)</option>
+      </select></label>
+    <label class="field"><span>App ID for v3 (optional)</span><input id="optAppId" inputmode="numeric" placeholder="1089"></label>
+    <button class="btn" id="reconnectBtn" type="button">Reconnect</button>
+    <p class="meta" id="connDetail"></p>
+
+    <h2 class="h">About</h2>
+    <div class="note">
+      <p>Deriv's synthetic indices are generated by a random number generator. No indicator is proven to predict them. SynthScope shows what each tool says and measures, with the backtest, whether that has worked better than chance. It is not financial advice. Test on a demo account first and never trade money you cannot afford to lose.</p>
+      <p>SynthScope reads public prices only. It never logs in to your account or places trades.</p>
+    </div>
+    <p class="meta">Charts by <a href="https://www.tradingview.com/" target="_blank" rel="noopener">TradingView Lightweight Charts</a>. Version <span id="appVersion"></span>.</p>
+  </section>
+</main>
+
+<nav class="tabs" aria-label="Sections">
+  <button type="button" data-tab="scan" class="active"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h6"/></svg>Scan</button>
+  <button type="button" data-tab="chart"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v16M7 8h-2v8h4V8zM17 4v16M15 6h4v8h-4z"/></svg>Chart</button>
+  <button type="button" data-tab="test"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h16M7 16l4-5 3 3 5-7"/></svg>Backtest</button>
+  <button type="button" data-tab="alerts"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0"/></svg>Alerts<span class="badge" id="alertBadge" hidden></span></button>
+  <button type="button" data-tab="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>Settings</button>
+</nav>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<div class="modal" id="disclaimer" hidden>
+  <div class="modal-box">
+    <h2>Before you start</h2>
+    <p>Synthetic indices are random by design. These signals are indicator readings, not predictions, and none of them is proven to work. Use the Backtest tab to see the real numbers, practise on a demo account, and only risk money you can afford to lose.</p>
+    <button class="btn primary" id="disclaimerOk" type="button">I understand</button>
+  </div>
+</div>
+
+<script src="vendor/lightweight-charts.standalone.production.js"></script>
+<script src="js/indicators.js"></script>
+<script src="js/strategies.js"></script>
+<script src="js/deriv.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
