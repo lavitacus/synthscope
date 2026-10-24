@@ -1,0 +1,9 @@
+node_modules/
+android/
+test/node_modules/
+*.apk
+.DS_Store
+www/icons/*.png
+assets/*.png
+www/vendor/
+package-lock.json
