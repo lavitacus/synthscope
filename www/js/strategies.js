@@ -379,11 +379,13 @@
     return res;
   }
 
+  // zAdj (set by recommend) is z corrected for picking among strategies; it only shrinks good results
   function verdict(r) {
+    const zg = r.zAdj === undefined ? r.z : r.zAdj;
     if (r.trades < MIN_TRADES) return { code: 'few', label: 'Too few trades' };
     if (r.winRate > r.baseWin + 0.1 && r.avgR <= 0) return { code: 'trap', label: 'Wins often, loses big' };
-    if (r.z >= 3 && r.half1 > 0 && r.half2 > 0 && r.avgR > 0) return { code: 'edge', label: 'Possible edge' };
-    if (r.z >= 2 && r.avgR > 0) return { code: 'weak', label: 'Promising, unproven' };
+    if (zg >= 3 && r.half1 > 0 && r.half2 > 0 && r.avgR > 0) return { code: 'edge', label: 'Possible edge' };
+    if (zg >= 2 && r.avgR > 0) return { code: 'weak', label: 'Promising, unproven' };
     if (r.z <= -2) return { code: 'worse', label: 'Worse than chance' };
     return { code: 'none', label: 'No edge' };
   }
@@ -391,7 +393,8 @@
   // 0 to 100. About 27 means chance level, 50 is a slight lean, 88+ needs z of 3.
   function edgeScore(r) {
     if (r.trades < MIN_TRADES) return 0;
-    let s = 100 / (1 + Math.exp(-(r.z - 1)));
+    const zg = r.zAdj === undefined ? r.z : r.zAdj;
+    let s = 100 / (1 + Math.exp(-(zg - 1)));
     if (!(r.half1 > 0 && r.half2 > 0)) s *= 0.7;
     if (r.avgR <= 0) s = Math.min(s, 30);
     return Math.round(s);
@@ -399,12 +402,44 @@
 
   const scoreLabel = s => s >= 85 ? 'Strong' : s >= 65 ? 'Promising' : s >= 40 ? 'Weak' : 'No edge';
 
-  // Rank every strategy for this market, best first
+  // ---------- correction for picking the best of many ----------
+  function normCdf(z) {
+    const t = 1 / (1 + 0.2316419 * Math.abs(z)), d = 0.3989422804 * Math.exp(-z * z / 2);
+    const p = d * t * (0.319381530 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
+    return z > 0 ? 1 - p : p;
+  }
+  function normInv(p) { // Acklam's approximation
+    if (p <= 0) return -Infinity; if (p >= 1) return Infinity;
+    const a = [-39.69683028665376, 220.9460984245205, -275.9285104469687, 138.3577518672690, -30.66479806614716, 2.506628277459239];
+    const b = [-54.47609879822406, 161.5858368580409, -155.6989798598866, 66.80131188771972, -13.28068155288572];
+    const c = [-0.007784894002430293, -0.3223964580411365, -2.400758277161838, -2.549732539343734, 4.374664141464968, 2.938163982698783];
+    const d = [0.007784695709041462, 0.3224671290700398, 2.445134137142996, 3.754408661907416];
+    const lo = 0.02425, hi = 1 - lo;
+    if (p < lo) { const q = Math.sqrt(-2 * Math.log(p)); return (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1); }
+    if (p > hi) { const q = Math.sqrt(-2 * Math.log(1 - p)); return -(((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1); }
+    const q = p - 0.5, r = q * q;
+    return (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q / (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1);
+  }
+  /* Testing m strategies and keeping the best makes luck look like skill. This turns
+     a z score into the z it would have been as a single test (Sidak correction). */
+  function adjustZ(z, m) {
+    if (m <= 1 || !Number.isFinite(z)) return z;
+    const p = 1 - normCdf(z);
+    if (p < 1e-12) return z - Math.sqrt(2 * Math.log(m));
+    const pa = -Math.expm1(m * Math.log1p(-p));
+    return -normInv(pa);
+  }
+
+  // Rank every strategy for this market, best first. Scores are corrected for
+  // choosing among all strategies, so a lucky winner on random data stays low.
   function recommend(S, opts = {}) {
     const lib = library(opts.threshold || 50);
     const famBoost = st => (st.bestFor || []).includes(opts.family) ? 1 : 0;
-    return lib.map(st => backtest(S, st, opts)).filter(Boolean)
-      .sort((a, b) => b.score - a.score || b.z - a.z || famBoost(byId(b.strategy)) - famBoost(byId(a.strategy)));
+    return lib.map(st => backtest(S, st, opts)).filter(Boolean).map(r => {
+      r.zAdj = Math.max(-10, Math.min(50, adjustZ(r.z, lib.length)));
+      r.verdict = verdict(r); r.score = edgeScore(r);
+      return r;
+    }).sort((a, b) => b.score - a.score || b.zAdj - a.zAdj || famBoost(byId(b.strategy)) - famBoost(byId(a.strategy)));
   }
 
   // Live read of one strategy at the last closed candle i
@@ -441,7 +476,7 @@
   const api = {
     WARMUP, MIN_TRADES, TP1_R, TP2_R, PRESETS, CLASSIC, FAMILY_LABEL,
     family, allowed, compute, library, byId, regime, score, plan, sizing, simulate, baseline,
-    backtest, recommend, live, snapshot, events, edgeScore, scoreLabel
+    backtest, recommend, live, snapshot, events, edgeScore, scoreLabel, adjustZ, normCdf
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.Strat = api;

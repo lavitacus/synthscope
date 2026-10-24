@@ -1,6 +1,6 @@
 {
   "name": "synthscope",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
   "description": "Signals and backtests for Deriv synthetic indices",
   "scripts": {
@@ -8,7 +8,8 @@
     "android:add": "cap add android",
     "android:sync": "cap sync android",
     "android:icons": "capacitor-assets generate --android --iconBackgroundColor '#0e1418' --iconBackgroundColorDark '#0e1418'",
-    "prepare-web": "bash scripts/prepare-web.sh"
+    "prepare-web": "bash scripts/prepare-web.sh",
+    "scan": "node server/scan.js"
   },
   "dependencies": {
     "@capacitor/android": "6.2.2",

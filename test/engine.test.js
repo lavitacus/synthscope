@@ -96,5 +96,11 @@ check(trend.ms < 3000, 'recommend on 2000 candles takes ' + trend.ms + ' ms');
 const L = Strat.live(trend.S, Strat.byId('macd_cross'), trend.S.n - 2, { family: 'volatility', fresh: 60 });
 check(L.lastDir !== 0 && (L.active === 0 || L.plan), 'live read returns last signal and a plan when active');
 
+// ---- picking the best of 13 must not make noise look strong ----
+let promising = 0, strong = 0; const M = 120;
+for (let k = 0; k < M; k++) { const s = Strat.recommend(Strat.compute(walk(1000)), { family: 'volatility' })[0].score; if (s >= 65) promising++; if (s >= 85) strong++; }
+check(promising / M <= 0.08 && strong / M <= 0.02, `best-of-13 on random data: ${(promising / M * 100).toFixed(1)}% Promising, ${(strong / M * 100).toFixed(1)}% Strong`);
+check(Strat.adjustZ(4, 13) < 4 && Strat.adjustZ(4, 13) > 3, 'correction shrinks z=4 to ' + Strat.adjustZ(4, 13).toFixed(2));
+
 if (failed) { console.log('\n' + failed + ' check(s) failed'); process.exit(1); }
 console.log('\nAll checks passed');
