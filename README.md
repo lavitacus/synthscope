@@ -1,40 +1,46 @@
 # SynthScope
 
-Signals and backtests for Deriv synthetic indices, as a web app you can install on Android and as an APK.
+Smart Scan, live trade plans and backtests for Deriv's synthetic indices (Vixed Indices), as a web app you can install on Android and as an APK.
 
 SynthScope reads Deriv's public price feed. It never logs in to your Deriv account and never places trades.
 
 ## What it does
 
-- **Scan** ranks every synthetic market (Volatility, Boom/Crash, Step, Jump and the rest) by a combined signal on any of Deriv's 12 timeframes, from 1 minute to 1 day.
-- **Chart** shows live candles with EMA 21, EMA 200 and Supertrend, arrows where the combined signal fired, a breakdown of all seven indicators, and a check across all 12 timeframes at once.
-- **Backtest** tests each indicator on up to 5,000 candles of real Deriv history, for one market or all of them, and compares the result with chance.
-- **Alerts** watch up to 20 market and timeframe pairs and alert you with sound, vibration and a notification when a new BUY or SELL appears on a closed candle. Alerts only run while the app is open.
+SynthScope calls Deriv's synthetic indices **Vixed Indices**.
 
-## The indicators
+- **Smart Scan** backtests all 13 strategies on every Vixed index and every timeframe you pick (1 minute to 1 day). It finds the strategy that has worked best on each one and shows its live signals as cards with entry, stop loss, TP1, TP2, dollar risk and MT5 lot size. With live mode on, it rescans after every candle closes.
+- **Chart** shows live candles, the selected strategy's signals and the active trade plan as lines. "Best here" ranks the top 3 strategies for that market right now, and it can check all 12 timeframes at once.
+- **Strategies** holds the library and a backtester that trades each strategy with the app's own stops and targets.
+- **Alerts** watch up to 20 market and timeframe pairs, alert with sound, vibration and a notification, and forward test every alert until it hits the stop, TP1 or the max hold.
 
-| Tool | Type | Signal |
-|---|---|---|
-| EMA 9/21 cross | Trend | Fast EMA crosses the slow EMA |
-| EMA 50/200 trend | Trend | Price and EMA 50 on one side of EMA 200 |
-| Supertrend 10/3 | Trend | Price flips across the ATR trailing line |
-| MACD 12/26/9 | Trend | MACD crosses its signal line |
-| RSI 14 reversal | Oscillator | RSI back above 30 or below 70 |
-| Bollinger 20/2 bounce | Oscillator | Close back inside a band |
-| Stochastic 14/3/3 | Oscillator | %K/%D cross below 20 or above 80 |
+## Strategy library
 
-The **combined score** (-100 to +100) is a weighted vote of all seven. When ADX is 25 or more the trend tools count three times as much as the oscillators; below 20 it is the other way round. BUY or SELL appears when the score passes the threshold you set in Settings (50 by default).
+The top 5, ranked by how often each setup appears across trader forums, the Deriv community and strategy guides:
 
-## Reading the backtest honestly
+| # | Strategy | Rules | Best for |
+|---|---|---|---|
+| 1 | RSI 50 + MA 21 Momentum | RSI 14 above 50 and close above the 21 EMA (mirror for sells) | Volatility, Jump, Step |
+| 2 | Spike Rider (EMA 200 + RSI 14) | Above the 200 EMA, RSI under 30, two red candles (mirror for sells) | Boom, Crash |
+| 3 | Spike Catcher (EMA 5/15 + Stochastic) | EMA 5/15 cross with %K under 20 or over 80 in the last 3 candles | Boom, Crash, Volatility |
+| 4 | Triple EMA 21/55/89 + MACD | EMAs stacked, ADX over 20, MACD crosses its signal line | Volatility, Drift, Step |
+| 5 | EMA 50 Pullback | Rising 50 EMA, price touches it, rejection candle closes back above | Volatility, Step, Boom/Crash |
 
-Deriv generates these markets with a random number generator, so no indicator is proven to work on them. The backtest is built to stop you fooling yourself:
+Plus 7 classic tools (EMA 9/21, EMA 50/200, Supertrend, MACD, RSI, Bollinger, Stochastic) and a combined score of the classic tools weighted by ADX.
 
-- **Chance** is the win rate a random entry in the same direction would get on that market. On Boom and Crash it is far from 50% because price drifts between spikes.
-- **Avg move** is the average result per trade in ATR units. A strategy that wins 97% of the time can still lose money on Boom/Crash. The app flags this as **Wins often, loses big**.
-- **z** measures how unlikely the edge is by luck. **Possible edge** needs z of 3 or more, a positive average move, and a positive edge in both halves of the history.
-- When you test many pairs, the app tells you how many would pass by pure luck.
+On Boom only buys are taken and on Crash only sells, because that is the spike direction. This can be turned off in Settings.
 
-Trades in the backtest never overlap, enter at the close of the signal candle, and exit after the hold time you choose.
+## Trade plans
+
+- **Entry:** the live price when the signal fires on a closed candle.
+- **Stop loss (smart mix):** just beyond the nearest swing low or high of the last 10 candles when that sits 0.8 to 3 ATR away, otherwise 1.5 ATR.
+- **Take profit:** TP1 at 1.5 times the risk, TP2 at 3 times.
+- **Size:** risk is a percent of the balance you enter (2% by default). MT5 lots = risk / stop distance, assuming contract size 1.
+
+## How strategies are scored
+
+Every backtest trade uses the plan above and exits at the stop, TP1, or the max hold. Results are compared with a coin-flip trader using the same stops and targets on the same market, which catches the Boom/Crash trap where a high win rate still loses money.
+
+The **edge score** (0 to 100) comes from the z score of that edge: about 27 is chance level, 65+ is promising, and 85+ needs z of 3 with a positive edge in both halves of the history. Fewer than 20 trades scores 0. In testing on random price series the engine reported zero false edges across 78 tests, and it ranked a planted trend at 100.
 
 ## Project layout
 
