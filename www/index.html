@@ -5,13 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>SynthScope</title>
 <meta name="description" content="Smart Scan, trade plans and backtests for Vixed Indices">
-<meta name="theme-color" content="#04060c">
+<meta name="theme-color" content="#000000">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Manrope:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
@@ -34,6 +34,7 @@
   <section class="view" id="view-scan" data-view="scan">
     <div class="glass panel">
       <div class="panel-head"><h1 class="title">Smart Scan</h1><span class="chip live-chip" id="liveChip" hidden><span class="dot online"></span>Live</span></div>
+      <div class="seg mode-seg" role="group" aria-label="Trading mode"><button type="button" class="seg-btn" data-mode="swing">Regular</button><button type="button" class="seg-btn" data-mode="scalp">Scalper</button></div>
       <div class="label">Timeframes</div>
       <div class="chips" id="scanTfChips" role="group" aria-label="Timeframes"></div>
       <div class="controls">
@@ -55,6 +56,7 @@
       <button type="button" class="seg-btn active" data-scanview="signals" id="segSignals">Live signals <span class="count" id="countSignals">0</span></button>
       <button type="button" class="seg-btn" data-scanview="board" id="segBoard">Market board <span class="count" id="countBoard">0</span></button>
     </div>
+    <div data-guard></div>
     <div id="proposals" class="cards"></div>
     <ol id="board" class="rows glass" hidden></ol>
   </section>
@@ -66,6 +68,7 @@
         <label class="field grow"><span>Vixed index</span><select id="chartSym"></select></label>
         <label class="field"><span>Timeframe</span><select id="chartTf"></select></label>
       </div>
+      <div class="seg mode-seg" role="group" aria-label="Trading mode"><button type="button" class="seg-btn" data-mode="swing">Regular</button><button type="button" class="seg-btn" data-mode="scalp">Scalper</button></div>
       <label class="field"><span>Strategy</span><select id="chartStrategy"></select></label>
       <div class="recs" id="recStrip"></div>
     </div>
@@ -78,11 +81,13 @@
       </div>
       <div class="plan" id="sigPlan"></div>
       <p class="warn-line" id="sigWarn" hidden></p>
+      <div class="card-stats" id="sigStats"></div>
     </div>
 
     <div class="glass chart-wrap"><div id="chart"></div></div>
     <p class="legend"><span class="sw sw-a"></span>EMA 21 <span class="sw sw-b"></span>EMA 200 <span class="sw sw-c"></span>Supertrend. Arrows show the selected strategy's signals on closed candles. Dashed lines show the active trade plan.</p>
     <div class="controls">
+      <button class="btn primary" id="chartTakeBtn" type="button">Took it</button>
       <button class="btn" id="watchBtn" type="button">Add to alerts</button>
       <button class="btn" id="mtfBtn" type="button">Check all timeframes</button>
       <button class="btn" id="chartTestBtn" type="button">Backtest here</button>
@@ -100,6 +105,9 @@
     <h1 class="title">Strategy library</h1>
     <p class="meta">The top 5 setups from research across trader forums, the Deriv community and strategy guides, plus 7 classic tools and a combined score. None comes with verified results, so test them here first.</p>
     <div class="cards" id="libCards"></div>
+    <h2 class="h">Scalper library</h2>
+    <p class="meta">Six 1 minute setups: the most shared Deriv scalps, the Connors RSI 2 rule known for its high win rate, two FXOpen 1 minute systems and the Deriv community spike scalp. They trade with a tighter stop, TP1 at 1R and a 15 candle limit, and every test pays the spread.</p>
+    <div class="cards" id="scalpCards"></div>
     <details class="glass explain"><summary>Classic tools and combined score</summary><ul class="rows" id="classicList"></ul></details>
 
     <div class="glass panel" id="testPanel">
@@ -112,27 +120,62 @@
         <label class="field"><span>History</span>
           <select id="testCount"><option value="1000">1,000 candles</option><option value="2500">2,500 candles</option><option value="5000">5,000 candles</option></select></label>
         <label class="field"><span>Max hold</span>
-          <select id="testHold"><option value="20">20 candles</option><option value="50">50 candles</option><option value="100">100 candles</option></select></label>
+          <select id="testHold"><option value="0">Mode default</option><option value="10">10 candles</option><option value="20">20 candles</option><option value="50">50 candles</option><option value="100">100 candles</option></select></label>
+        <label class="field"><span>Mode</span>
+          <select id="testMode"><option value="swing">Regular (13 strategies)</option><option value="scalp">Scalper (6 strategies)</option></select></label>
       </div>
       <button class="btn primary" id="testBtn" type="button">Run backtest</button>
       <div class="radar-row" id="testProgress" hidden>
         <div class="radar" aria-hidden="true"><span class="sweep"></span></div>
         <div class="radar-text"><div id="testProgText">Starting</div><div class="bar"><span id="testBar"></span></div></div>
       </div>
-      <p class="meta" id="testMeta">Every trade uses the app's own plan: entry at the signal candle's close, smart-mix stop, exit at TP1 (1.5x risk), the stop, or the max hold.</p>
+      <p class="meta" id="testMeta">Every trade uses the app's own plan and pays the market's spread: entry at the signal candle's close, smart-mix stop, exit at TP1 (1.5R regular, 1R scalper), the stop, the strategy's own exit, or the max hold.</p>
     </div>
     <div class="table-wrap glass" id="testWrap" hidden><table class="results" id="testTable">
-      <thead><tr><th>Strategy</th><th>Trades</th><th>Win</th><th>Avg R</th><th>Chance R</th><th>Edge</th><th>z</th><th>Score</th><th>Verdict</th></tr></thead>
+      <thead><tr><th>Strategy</th><th>Trades</th><th>Win</th><th>Needs</th><th>Avg R</th><th>Chance R</th><th>Edge</th><th>z</th><th>Score</th><th>Verdict</th></tr></thead>
       <tbody></tbody>
     </table></div>
     <div class="glass note" id="testNote" hidden></div>
     <details class="glass explain">
       <summary>How to read the results</summary>
-      <p><b>R</b> is profit in units of risk. +1.5R means a trade hit TP1. -1R means it hit the stop. <b>Avg R</b> is the average per trade.</p>
+      <p><b>R</b> is profit in units of risk. +1.5R means a trade hit TP1. -1R means it hit the stop. <b>Avg R</b> is the average per trade after the spread.</p>
+      <p><b>Win</b> is how often a trade made money and <b>Needs</b> is the win rate it must reach to break even with its own average win and loss. Win rate on its own means little: a close target and a far stop wins often and still loses money. SynthScope ranks by profit and shows win rate next to it.</p>
       <p><b>Chance R</b> is what random entries with the same stops and targets earned on this market. On Boom and Crash that is often negative, because spikes jump past stops.</p>
       <p><b>Edge</b> is Avg R minus Chance R. <b>z</b> says how unlikely that edge is by luck. Below 2 is noise.</p>
-      <p><b>Score</b> runs from 0 to 100. It is corrected for picking the best of 13 strategies, because testing many and keeping the winner makes luck look like skill. On purely random prices fewer than 3 in 100 markets reach 65 (Promising) and about 3 in 1,000 reach 85 (Strong). Treat even a high score as something to forward test, not a promise.</p>
+      <p><b>Score</b> runs from 0 to 100. It is corrected for picking the best of the strategies tested (13 regular or 6 scalper), because testing many and keeping the winner makes luck look like skill. On purely random prices about 3 to 5 in 100 markets reach 65 (Promising) and about 1 in 100 reach 85 (Strong). Treat even a high score as something to forward test, not a promise.</p>
     </details>
+  </section>
+
+  <!-- UNDER $10 -->
+  <section class="view" id="view-small" data-view="small" hidden>
+    <div class="glass panel">
+      <div class="panel-head"><h1 class="title">Under $10</h1><span class="chip" id="smallCount"></span></div>
+      <p class="meta">Small balances fail in two ways: the minimum trade is too big for the account, or fees eat the edge. This tab only shows trades that fit your balance and counts every cost.</p>
+      <div class="controls">
+        <label class="field"><span>Balance ($)</span><input id="smallBalance" inputmode="decimal" placeholder="10"></label>
+        <label class="field"><span>Style</span><select id="smallStyle"><option value="scalp">Scalper, 1 minute</option><option value="swing">Regular, 5 and 15 minute</option></select></label>
+      </div>
+      <div class="label">Platform</div>
+      <div class="seg" role="group" aria-label="Platform"><button type="button" class="seg-btn" data-plat="mt5">MT5</button><button type="button" class="seg-btn" data-plat="mult">Multipliers</button></div>
+      <div class="label">Plan</div>
+      <div class="seg" role="group" aria-label="Plan"><button type="button" class="seg-btn" data-plan="safe">Safe, 2%</button><button type="button" class="seg-btn" data-plan="challenge">Challenge, 5% ladder</button></div>
+      <div class="controls" id="smallTargetWrap" hidden><label class="field"><span>Challenge goal ($)</span><input id="smallTarget" inputmode="decimal" placeholder="50"></label></div>
+      <div class="note glass" id="smallPlanBox"></div>
+      <button class="btn primary" id="smallBtn" type="button">Find small account trades</button>
+      <div class="radar-row" id="smallProgress" hidden>
+        <div class="radar" aria-hidden="true"><span class="sweep"></span></div>
+        <div class="radar-text"><div id="smallProgText">Starting</div><div class="bar"><span id="smallBar"></span></div></div>
+      </div>
+      <p class="meta" id="smallMeta"></p>
+    </div>
+    <div data-guard></div>
+    <h2 class="h">Live trades that fit</h2>
+    <div class="cards" id="smallSignals"></div>
+    <h2 class="h">Best strategies for this balance</h2>
+    <p class="meta">Ranked by edge score. The simulation replays each strategy's backtest trades (with the luck of picking the winner taken out) 1,500 times from your balance and plan, and counts how often the account reaches the goal or can no longer place a trade.</p>
+    <ul class="rows glass" id="smallBest"></ul>
+    <h2 class="h">Markets at this balance</h2>
+    <ul class="rows glass" id="smallMarkets"></ul>
   </section>
 
   <!-- ALERTS -->
@@ -144,6 +187,7 @@
       <label class="switch"><input type="checkbox" id="optVibrate"><span class="track"></span>Vibrate</label>
       <label class="switch"><input type="checkbox" id="optAwake"><span class="track"></span>Keep screen on</label>
     </div>
+    <div data-guard></div>
     <h2 class="h">Watching</h2>
     <p class="meta" id="watchEmpty">Nothing yet. Tap Watch on a Smart Scan signal, or Add to alerts on the Chart.</p>
     <ul class="rows glass" id="watchList"></ul>
@@ -163,7 +207,7 @@
         <label class="field"><span>Account balance ($)</span><input id="optBalance" inputmode="decimal" placeholder="100"></label>
         <label class="field"><span>Risk per trade (%)</span><input id="optRisk" inputmode="decimal" placeholder="2"></label>
       </div>
-      <p class="meta">Each trade plan shows the dollar risk and the MT5 lot size for it. Lots assume a contract size of 1, which is standard on Deriv's MT5 Vixed indices. Check your platform's minimum lot.</p>
+      <p class="meta">Each trade plan shows the dollar risk and the MT5 lot size for it, using each market's contract size and minimum lot from Costs and lot sizes below.</p>
       <label class="switch"><input type="checkbox" id="optSpike"><span class="track"></span>Boom and Crash: only trade in the spike direction</label>
     </div>
     <div class="glass panel">
@@ -172,6 +216,27 @@
       <label class="field"><span>Only alert when the edge score is at least: <b id="minScoreVal">0</b></span><input type="range" id="optMinScore" min="0" max="90" step="5"></label>
       <label class="field"><span>History loaded per market</span>
         <select id="optHistory"><option value="600">600 candles (data saver)</option><option value="1000">1,000 candles</option><option value="2000">2,000 candles</option></select></label>
+    </div>
+    <div class="glass panel">
+      <h2 class="h">Daily guardrails</h2>
+      <label class="switch"><input type="checkbox" id="optGuard"><span class="track"></span>Pause signals when a limit is hit</label>
+      <div class="controls">
+        <label class="field"><span>Daily loss stop (%)</span><input id="optLossPct" inputmode="decimal" placeholder="6"></label>
+        <label class="field"><span>Max trades a day</span><input id="optMaxTrades" inputmode="numeric" placeholder="10"></label>
+        <label class="field"><span>Profit lock (%)</span><input id="optProfitPct" inputmode="decimal" placeholder="4"></label>
+      </div>
+      <p class="meta">Counts the trades you mark with Took it. When a limit is reached, alerts go quiet and signals are greyed out until midnight.</p>
+    </div>
+    <div class="glass panel">
+      <h2 class="h">Costs and lot sizes</h2>
+      <label class="field"><span>Market</span><select id="specSym"></select></label>
+      <div class="controls">
+        <label class="field"><span>Min lot</span><input id="specMinLot" inputmode="decimal"></label>
+        <label class="field"><span>Contract size</span><input id="specContract" inputmode="decimal"></label>
+        <label class="field"><span>Spread (points)</span><input id="specSpread" inputmode="decimal"></label>
+      </div>
+      <div class="controls"><button class="btn" id="specSave" type="button">Save</button><button class="btn ghost" id="specReset" type="button">Use estimate</button></div>
+      <p class="meta" id="specNote"></p>
     </div>
     <div class="glass panel">
       <h2 class="h">Connection</h2>
@@ -184,6 +249,7 @@
     <div class="glass panel">
       <h2 class="h">Coming next</h2>
       <ul class="roadmap">
+        <li><b>Done:</b> Scalper mode, the Under $10 tab and daily guardrails</li>
         <li><b>Phase 2:</b> 24/7 scanner on GitHub Actions with ntfy alerts (ready, see the README), then automatic paper trading on your Deriv demo account</li>
         <li><b>Phase 3:</b> on-phone neural network and strategy evolver</li>
       </ul>
@@ -200,6 +266,7 @@
   <button type="button" data-tab="scan" class="active"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 12l6-6"/></svg>Scan</button>
   <button type="button" data-tab="chart"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v16M5 8h4v8H5zM17 4v16M15 6h4v8h-4z"/></svg>Chart</button>
   <button type="button" data-tab="test"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l9 5-9 5-9-5zM3 13l9 5 9-5"/></svg>Strategies</button>
+  <button type="button" data-tab="small"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M14.5 9.2c-.5-.8-1.4-1.2-2.5-1.2-1.5 0-2.6.8-2.6 2s1.1 1.6 2.6 2 2.6.8 2.6 2-1.1 2-2.6 2c-1.1 0-2.1-.5-2.6-1.3M12 6.5v1.5M12 16v1.5"/></svg>Under $10</button>
   <button type="button" data-tab="alerts"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0"/></svg>Alerts<span class="badge" id="alertBadge" hidden></span></button>
   <button type="button" data-tab="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>Settings</button>
 </nav>

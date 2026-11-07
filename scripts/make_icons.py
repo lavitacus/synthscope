@@ -1,23 +1,59 @@
-# Draws the SynthScope app icons. Run: pip install pillow && python scripts/make_icons.py
-import os
-from PIL import Image, ImageDraw
-G=(47,191,138,255); R=(239,90,90,255); A=(217,164,65,255); BG=(14,20,24,255)
-def draw(size, ring_r, transparent=False):
-    img = Image.new('RGBA', (size,size), (0,0,0,0) if transparent else BG); d = ImageDraw.Draw(img)
-    c=size/2; r=size*ring_r; lw=max(3,int(size/26))
-    d.ellipse([c-r,c-r,c+r,c+r], outline=A, width=lw)
-    inner=r*0.62; x0=c-inner; y0=c-inner; span=2*inner; w=span/7
-    bars=[(0.12,0.62,0.86,0.52,0.96,G),(0.37,0.40,0.66,0.30,0.76,R),(0.62,0.24,0.50,0.14,0.60,G),(0.87,0.06,0.32,0.00,0.42,G)]
-    for fx,bt,bb,wt,wb,col in bars:
-        cx=x0+fx*span
-        d.line([(cx,y0+wt*span),(cx,y0+wb*span)], fill=col, width=max(2,int(size/90)))
-        d.rectangle([cx-w/2,y0+bt*span,cx+w/2,y0+bb*span], fill=col)
+# Draws the SynthScope app icons: a silver lens with a champagne ring on a black field lit
+# by a soft dusk glow, matching the in-app brand mark. Run: pip install pillow && python scripts/make_icons.py
+import os, math
+from PIL import Image, ImageDraw, ImageFilter
+
+BLACK = (0, 0, 0, 255)
+CHAMP = (230, 200, 145, 255)
+SS = 4  # supersampling for smooth edges
+
+def radial(size, cx, cy, r, inner, outer):
+    img = Image.new('RGBA', (size, size), outer)
+    px = img.load()
+    for y in range(size):
+        for x in range(size):
+            t = min(1.0, math.hypot(x - cx, y - cy) / r)
+            px[x, y] = tuple(int(inner[i] + (outer[i] - inner[i]) * t) for i in range(4))
     return img
+
+def background(size):
+    s = size // 8  # paint small, scale up: the glow is soft anyway
+    bg = Image.new('RGBA', (s, s), BLACK)
+    glow = radial(s, s * 0.3, s * 0.25, s * 0.75, (22, 52, 74, 255), (0, 0, 0, 0))
+    glow2 = radial(s, s * 0.8, s * 0.85, s * 0.7, (40, 32, 88, 255), (0, 0, 0, 0))
+    bg = Image.alpha_composite(bg, glow); bg = Image.alpha_composite(bg, glow2)
+    return bg.resize((size, size), Image.BICUBIC).filter(ImageFilter.GaussianBlur(size / 40))
+
+def mark(size, scale):
+    S = size * SS; img = Image.new('RGBA', (S, S), (0, 0, 0, 0))
+    c = S / 2; R = S * scale
+    # silver lens, lit from the top left
+    lens = radial(S // 4, (c - R * 0.35) / 4, (c - R * 0.4) / 4, R * 1.5 / 4, (255, 255, 255, 255), (120, 120, 128, 255)).resize((S, S), Image.BICUBIC)
+    mask = Image.new('L', (S, S), 0); ImageDraw.Draw(mask).ellipse([c - R, c - R, c + R, c + R], fill=255)
+    img.paste(lens, (0, 0), mask)
+    d = ImageDraw.Draw(img)
+    core = R * 0.68  # a thick silver ring around a dark lens, like the rim of a scope
+    d.ellipse([c - core, c - core, c + core, c + core], fill=(8, 8, 10, 255))
+    lw = max(2, int(R * 0.035))
+    d.ellipse([c - core, c - core, c + core, c + core], outline=CHAMP, width=lw)
+    dot = R * 0.13  # the signal: a champagne point inside the lens
+    d.ellipse([c + R * 0.12 - dot, c - R * 0.12 - dot, c + R * 0.12 + dot, c - R * 0.12 + dot], fill=CHAMP)
+    return img.resize((size, size), Image.LANCZOS)
+
+def icon(size, scale, transparent=False):
+    base = Image.new('RGBA', (size, size), (0, 0, 0, 0)) if transparent else background(size)
+    m = mark(size, scale)
+    shadow = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+    sm = Image.new('L', (size, size), 0); c = size / 2; r = size * scale
+    ImageDraw.Draw(sm).ellipse([c - r, c - r + size * 0.03, c + r, c + r + size * 0.03], fill=170)
+    shadow.putalpha(sm.filter(ImageFilter.GaussianBlur(size / 30)))
+    return Image.alpha_composite(Image.alpha_composite(base, shadow), m)
+
 root = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 for sub in ('www/icons', 'assets'): os.makedirs(os.path.join(root, sub), exist_ok=True)
 out = {
-  'www/icons/icon-192.png': draw(192,0.42), 'www/icons/icon-512.png': draw(512,0.42),
-  'www/icons/maskable-512.png': draw(512,0.32), 'assets/icon-only.png': draw(1024,0.40),
-  'assets/icon-foreground.png': draw(1024,0.30,True), 'assets/icon-background.png': Image.new('RGBA',(1024,1024),BG)
+    'www/icons/icon-192.png': icon(192, 0.30), 'www/icons/icon-512.png': icon(512, 0.30),
+    'www/icons/maskable-512.png': icon(512, 0.24), 'assets/icon-only.png': icon(1024, 0.30),
+    'assets/icon-foreground.png': icon(1024, 0.22, True), 'assets/icon-background.png': background(1024)
 }
 for p, im in out.items(): im.save(os.path.join(root, p)); print('wrote', p)

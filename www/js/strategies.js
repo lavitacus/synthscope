@@ -1,7 +1,8 @@
-/* SynthScope strategy engine v2.
-   Strategy library (5 researched setups + 7 classic tools + combined score),
-   trade plans with entry, stop loss and take profit, a backtester that uses
-   those plans, and live recommendations of the best strategy per market.
+/* SynthScope strategy engine v2.2.
+   Regular library (5 researched setups + 7 classic tools + combined score) and a
+   Scalper library (6 one minute setups), trade plans with entry, stop loss and take
+   profit, a backtester that uses those plans and pays the spread, live recommendations
+   of the best strategy per market, lot and Multiplier sizing, and an account simulator.
    Depends on Ind (indicators.js). */
 (function (root) {
   'use strict';
@@ -37,13 +38,19 @@
   function compute(candles) {
     const o = candles.map(c => c.open), h = candles.map(c => c.high),
       l = candles.map(c => c.low), c = candles.map(c => c.close);
+    const ema20 = Ind.ema(c, 20), atr10 = Ind.atr(h, l, c, 10);
     return {
       n: c.length, open: o, high: h, low: l, close: c, time: candles.map(x => x.epoch),
-      ema5: Ind.ema(c, 5), ema9: Ind.ema(c, 9), ema15: Ind.ema(c, 15), ema21: Ind.ema(c, 21),
+      ema5: Ind.ema(c, 5), ema9: Ind.ema(c, 9), ema15: Ind.ema(c, 15), ema20, ema21: Ind.ema(c, 21),
       ema50: Ind.ema(c, 50), ema55: Ind.ema(c, 55), ema89: Ind.ema(c, 89), ema200: Ind.ema(c, 200),
-      rsi: Ind.rsi(c, 14), macd: Ind.macd(c), bb: Ind.bollinger(c, 20, 2),
-      stoch: Ind.stochastic(h, l, c), adx: Ind.adx(h, l, c, 14),
-      st: Ind.supertrend(h, l, c, 10, 3), atr: Ind.atr(h, l, c, 14)
+      rsi: Ind.rsi(c, 14), rsi2: Ind.rsi(c, 2), rsi4: Ind.rsi(c, 4), rsi7: Ind.rsi(c, 7),
+      macd: Ind.macd(c), bb: Ind.bollinger(c, 20, 2),
+      stoch: Ind.stochastic(h, l, c), stoch5: Ind.stochastic(h, l, c, 5, 3, 3), adx: Ind.adx(h, l, c, 14),
+      st: Ind.supertrend(h, l, c, 10, 3), atr: Ind.atr(h, l, c, 14),
+      kelt: {
+        upper: ema20.map((e, i) => e === null || atr10[i] === null ? null : e + 2 * atr10[i]),
+        lower: ema20.map((e, i) => e === null || atr10[i] === null ? null : e - 2 * atr10[i])
+      }
     };
   }
 
@@ -252,6 +259,126 @@
     }
   ];
 
+  // ---------- scalper library (1 minute candles, short holds) ----------
+  // exit(S, j, dir) is an optional early exit checked at each candle close after entry.
+  const SCALP = [
+    {
+      id: 'sc_ema_rsi', rank: 1, name: 'EMA 9/21 + RSI 7 Scalp', kind: 'trend', group: 'scalp',
+      bestFor: ['volatility', 'jump', 'step'],
+      source: 'The most common 1 minute scalp in Deriv V75 and DTrader scalping guides: moving average trigger with an RSI filter',
+      rules: 'BUY when EMA 9 crosses above EMA 21 while price is above the 50 EMA and RSI 7 is above 50. SELL is the mirror.',
+      event(S, i) {
+        if (i < 1 || !ok(S.ema9[i], S.ema21[i], S.ema9[i - 1], S.ema21[i - 1], S.ema50[i], S.rsi7[i])) return 0;
+        const a = S.ema9[i - 1] - S.ema21[i - 1], b = S.ema9[i] - S.ema21[i], c = S.close[i];
+        if (a <= 0 && b > 0 && c > S.ema50[i] && S.rsi7[i] > 50) return 1;
+        if (a >= 0 && b < 0 && c < S.ema50[i] && S.rsi7[i] < 50) return -1;
+        return 0;
+      },
+      state(S, i) {
+        if (!ok(S.ema9[i], S.ema21[i], S.ema50[i])) return 0;
+        if (S.ema9[i] > S.ema21[i] && S.close[i] > S.ema50[i]) return 1;
+        if (S.ema9[i] < S.ema21[i] && S.close[i] < S.ema50[i]) return -1;
+        return 0;
+      },
+      reading(S, i) { return ok(S.rsi7[i]) ? 'RSI 7 ' + S.rsi7[i].toFixed(0) + (S.ema9[i] > S.ema21[i] ? ', 9 above 21' : ', 9 below 21') : '-'; }
+    },
+    {
+      id: 'sc_rsi2', rank: 2, name: 'RSI 2 Snapback (Connors)', kind: 'osc', group: 'scalp',
+      bestFor: ['volatility', 'step', 'range'],
+      source: "Larry Connors' RSI 2 system, the best known high win rate mean reversion rule, sized down to 1 minute",
+      rules: 'BUY when price is above the 200 EMA and RSI 2 drops below 10. SELL when price is below the 200 EMA and RSI 2 rises above 90. Exit when price closes back across the 5 EMA, or at the stop or target.',
+      cond(S, i) {
+        if (!ok(S.rsi2[i], S.ema200[i])) return 0;
+        if (S.close[i] > S.ema200[i] && S.rsi2[i] < 10) return 1;
+        if (S.close[i] < S.ema200[i] && S.rsi2[i] > 90) return -1;
+        return 0;
+      },
+      event(S, i) { return edgeOf(this.cond.bind(this), S, i); },
+      state(S, i) { return this.cond(S, i); },
+      exit(S, j, dir) { return ok(S.ema5[j]) && (dir === 1 ? S.close[j] > S.ema5[j] : S.close[j] < S.ema5[j]); },
+      reading(S, i) { return ok(S.rsi2[i]) ? 'RSI 2 ' + S.rsi2[i].toFixed(0) + (S.close[i] > S.ema200[i] ? ', above EMA 200' : ', below EMA 200') : '-'; }
+    },
+    {
+      id: 'sc_bb_rsi4', rank: 3, name: 'Bollinger 20/2 + RSI 4 Reversal', kind: 'osc', group: 'scalp',
+      bestFor: ['volatility', 'step', 'range'],
+      source: 'FXOpen 1 minute scalping strategies (RSI 4 at 80/20 with Bollinger Bands)',
+      rules: 'BUY when RSI 4 climbs back above 20 and price touched the lower band on this or the last candle. SELL when RSI 4 drops back below 80 after touching the upper band. Exit at the middle band.',
+      event(S, i) {
+        if (i < 1 || !ok(S.rsi4[i], S.rsi4[i - 1], S.bb.lower[i], S.bb.lower[i - 1])) return 0;
+        const touchLo = S.low[i] <= S.bb.lower[i] || S.low[i - 1] <= S.bb.lower[i - 1];
+        const touchHi = S.high[i] >= S.bb.upper[i] || S.high[i - 1] >= S.bb.upper[i - 1];
+        if (S.rsi4[i - 1] < 20 && S.rsi4[i] >= 20 && touchLo) return 1;
+        if (S.rsi4[i - 1] > 80 && S.rsi4[i] <= 80 && touchHi) return -1;
+        return 0;
+      },
+      state(S, i) { const r = S.rsi4[i]; return !ok(r) ? 0 : r < 20 ? 1 : r > 80 ? -1 : 0; },
+      exit(S, j, dir) { return ok(S.bb.mid[j]) && (dir === 1 ? S.close[j] >= S.bb.mid[j] : S.close[j] <= S.bb.mid[j]); },
+      reading(S, i) { return ok(S.rsi4[i]) ? 'RSI 4 ' + S.rsi4[i].toFixed(0) : '-'; }
+    },
+    {
+      id: 'sc_keltner', rank: 4, name: 'Keltner Breakout + RSI 50', kind: 'trend', group: 'scalp',
+      bestFor: ['volatility', 'jump', 'drift'],
+      source: 'FXOpen 1 minute scalping strategies (Keltner Channel, EMA 20 with 2 ATR bands, RSI 50 filter)',
+      rules: 'BUY on the second close in a row above the upper Keltner band (EMA 20 + 2 ATR) with RSI 14 above 50. SELL on two closes below the lower band with RSI below 50. Exit when price closes back through the 20 EMA.',
+      event(S, i) {
+        if (i < 2 || !ok(S.kelt.upper[i], S.kelt.upper[i - 1], S.kelt.upper[i - 2], S.rsi[i])) return 0;
+        const up = k => S.close[k] > S.kelt.upper[k], dn = k => S.close[k] < S.kelt.lower[k];
+        if (up(i) && up(i - 1) && !up(i - 2) && S.rsi[i] > 50) return 1;
+        if (dn(i) && dn(i - 1) && !dn(i - 2) && S.rsi[i] < 50) return -1;
+        return 0;
+      },
+      state(S, i) { if (!ok(S.kelt.upper[i])) return 0; return S.close[i] > S.kelt.upper[i] ? 1 : S.close[i] < S.kelt.lower[i] ? -1 : 0; },
+      exit(S, j, dir) { return ok(S.ema20[j]) && (dir === 1 ? S.close[j] < S.ema20[j] : S.close[j] > S.ema20[j]); },
+      reading(S, i) { return !ok(S.kelt.upper[i]) ? '-' : S.close[i] > S.kelt.upper[i] ? 'Above the channel' : S.close[i] < S.kelt.lower[i] ? 'Below the channel' : 'Inside the channel'; }
+    },
+    {
+      id: 'sc_stoch_pull', rank: 5, name: 'Stochastic 5/3/3 Pullback', kind: 'osc', group: 'scalp',
+      bestFor: ['volatility', 'step', 'jump'],
+      source: 'Fast stochastic scalping settings (5, 3, 3) used with a 50 EMA trend filter in 1 minute EMA and Stochastic scalpers',
+      rules: 'BUY when the 50 EMA is rising, price is above it and Stochastic 5/3/3 %K crosses above %D from below 20. SELL is the mirror from above 80.',
+      event(S, i) {
+        const K = S.stoch5.k, D = S.stoch5.d;
+        if (i < 5 || !ok(K[i], D[i], K[i - 1], D[i - 1], S.ema50[i], S.ema50[i - 5])) return 0;
+        const a = K[i - 1] - D[i - 1], b = K[i] - D[i];
+        const rising = S.ema50[i] > S.ema50[i - 5], falling = S.ema50[i] < S.ema50[i - 5];
+        if (rising && S.close[i] > S.ema50[i] && a <= 0 && b > 0 && K[i - 1] < 20) return 1;
+        if (falling && S.close[i] < S.ema50[i] && a >= 0 && b < 0 && K[i - 1] > 80) return -1;
+        return 0;
+      },
+      state(S, i) {
+        if (i < 5 || !ok(S.ema50[i], S.ema50[i - 5], S.stoch5.k[i])) return 0;
+        if (S.ema50[i] > S.ema50[i - 5] && S.close[i] > S.ema50[i] && S.stoch5.k[i] < 50) return 1;
+        if (S.ema50[i] < S.ema50[i - 5] && S.close[i] < S.ema50[i] && S.stoch5.k[i] > 50) return -1;
+        return 0;
+      },
+      reading(S, i) { return ok(S.stoch5.k[i]) ? '%K ' + S.stoch5.k[i].toFixed(0) : '-'; }
+    },
+    {
+      id: 'sc_spike', rank: 6, name: 'Spike Scalp (EMA 200 + RSI 14)', kind: 'osc', group: 'scalp',
+      bestFor: ['boom', 'crash'],
+      source: 'Deriv community Boom and Crash 1 minute scalping post: EMA 200 trend, RSI 30/70, a small pullback, out after the first spike',
+      rules: 'BUY when price is above the 200 EMA, RSI 14 dips below 30 and a red candle prints. SELL is the mirror below the 200 EMA with RSI above 70 and a green candle. On Boom and Crash, exit on the first spike candle.',
+      cond(S, i) {
+        if (!ok(S.rsi[i], S.ema200[i])) return 0;
+        if (S.close[i] > S.ema200[i] && S.rsi[i] < 30 && bear(S, i)) return 1;
+        if (S.close[i] < S.ema200[i] && S.rsi[i] > 70 && bull(S, i)) return -1;
+        return 0;
+      },
+      event(S, i) { return edgeOf(this.cond.bind(this), S, i); },
+      state(S, i) {
+        if (!ok(S.rsi[i], S.ema200[i])) return 0;
+        if (S.close[i] > S.ema200[i] && S.rsi[i] < 40) return 1;
+        if (S.close[i] < S.ema200[i] && S.rsi[i] > 60) return -1;
+        return 0;
+      },
+      exit(S, j, dir) { // a spike = a candle body over 3 ATR in the trade direction
+        const a = S.atr[j - 1] || S.atr[j]; if (!ok(a)) return false;
+        return dir * (S.close[j] - S.open[j]) > 3 * a;
+      },
+      reading(S, i) { return ok(S.rsi[i], S.ema200[i]) ? 'RSI ' + S.rsi[i].toFixed(0) + (S.close[i] > S.ema200[i] ? ', above EMA 200' : ', below EMA 200') : '-'; }
+    }
+  ];
+
   // ---------- combined score of the classic tools ----------
   function regime(S, i) {
     const a = S.adx.adx[i];
@@ -276,34 +403,87 @@
     };
   }
 
-  function library(threshold = 50) { return PRESETS.concat(CLASSIC, [makeCombined(threshold)]); }
-  function byId(id, threshold = 50) { return library(threshold).find(s => s.id === id); }
+  const SCALP_IDS = new Set(SCALP.map(s => s.id));
+  function library(threshold = 50, mode = 'swing') {
+    return mode === 'scalp' ? SCALP.slice() : PRESETS.concat(CLASSIC, [makeCombined(threshold)]);
+  }
+  function byId(id, threshold = 50) { return library(threshold).concat(SCALP).find(s => s.id === id); }
+  const modeOf = id => SCALP_IDS.has(id) ? 'scalp' : 'swing';
+
+  // ---------- trading modes ----------
+  /* Regular: smart mix stop from the last 10 candles (0.8 to 3 ATR, else 1.5 ATR), TP1 1.5R, TP2 3R, 50 candle hold.
+     Scalper: tighter stop from the last 5 candles (0.5 to 2 ATR, else 1 ATR), TP1 1R, TP2 2R, 15 candle hold. */
+  const MODES = {
+    swing: { id: 'swing', label: 'Regular', look: 10, minA: 0.8, maxA: 3, atrStop: 1.5, tp1: TP1_R, tp2: TP2_R, maxHold: 50 },
+    scalp: { id: 'scalp', label: 'Scalper', look: 5, minA: 0.5, maxA: 2, atrStop: 1, tp1: 1, tp2: 2, maxHold: 15 }
+  };
+  const modeCfg = m => MODES[m] || MODES.swing;
 
   // ---------- trade plan ----------
-  /* Smart mix stop: the nearest swing low/high of the last 10 candles when it sits
-     between 0.8 and 3 ATR away, otherwise 1.5 ATR. TP1 = 1.5x risk, TP2 = 3x risk. */
-  function plan(S, i, dir, entry) {
-    const a = S.atr[i];
+  function plan(S, i, dir, entry, mode) {
+    const M = modeCfg(mode), a = S.atr[i];
     if (!ok(a) || !a || !dir) return null;
     const e = entry === undefined ? S.close[i] : entry;
     let lo = Infinity, hi = -Infinity;
-    for (let k = Math.max(0, i - 9); k <= i; k++) { if (S.low[k] < lo) lo = S.low[k]; if (S.high[k] > hi) hi = S.high[k]; }
+    for (let k = Math.max(0, i - M.look + 1); k <= i; k++) { if (S.low[k] < lo) lo = S.low[k]; if (S.high[k] > hi) hi = S.high[k]; }
     const swing = dir === 1 ? e - (lo - 0.2 * a) : (hi + 0.2 * a) - e;
     let dist, method;
-    if (swing >= 0.8 * a && swing <= 3 * a) { dist = swing; method = 'swing'; }
-    else { dist = 1.5 * a; method = 'atr'; }
-    return { dir, entry: e, sl: e - dir * dist, tp1: e + dir * TP1_R * dist, tp2: e + dir * TP2_R * dist, dist, method, atr: a };
+    if (swing >= M.minA * a && swing <= M.maxA * a) { dist = swing; method = 'swing'; }
+    else { dist = M.atrStop * a; method = 'atr'; }
+    return { dir, entry: e, sl: e - dir * dist, tp1: e + dir * M.tp1 * dist, tp2: e + dir * M.tp2 * dist, tp1R: M.tp1, tp2R: M.tp2, dist, method, atr: a, mode: M.id };
   }
 
-  // Position size for a given balance and risk percent. MT5 lots assume contract size 1.
-  function sizing(p, balance, riskPct) {
+  // ---------- market costs and contract specs ----------
+  /* Estimates for Deriv MT5, from published minimum lot tables (Oct 2026) and measured
+     spreads. Spread is a fraction of price unless pts is given. Every value can be
+     overridden in the app because Deriv changes them; check MT5's Specification window. */
+  const SPECS = [
+    [/volatility 10 \(1s\)/, { minLot: 0.5 }], [/volatility 15 \(1s\)/, { minLot: 0.2 }], [/volatility 25 \(1s\)/, { minLot: 0.005 }],
+    [/volatility 30 \(1s\)/, { minLot: 0.2 }], [/volatility 50 \(1s\)/, { minLot: 0.005 }], [/volatility 75 \(1s\)/, { minLot: 0.05 }],
+    [/volatility 90 \(1s\)/, { minLot: 0.1 }], [/volatility 100 \(1s\)/, { minLot: 1 }], [/volatility 150 \(1s\)/, { minLot: 1 }],
+    [/volatility 200 \(1s\)/, { minLot: 0.02 }], [/volatility 250 \(1s\)/, { minLot: 10 }], [/volatility 5 \(1s\)/, { minLot: 0.05 }],
+    [/volatility 10 index/, { minLot: 0.5 }], [/volatility 15 index/, { minLot: 0.1 }], [/volatility 25 index/, { minLot: 0.5 }],
+    [/volatility 30 index/, { minLot: 0.05 }], [/volatility 50 index/, { minLot: 4 }], [/volatility 75 index/, { minLot: 0.01 }],
+    [/volatility 90 index/, { minLot: 0.05 }], [/volatility 100 index/, { minLot: 1 }], [/volatility 5 index/, { minLot: 0.05 }],
+    [/boom 300/, { minLot: 1 }], [/crash 300/, { minLot: 0.5 }], [/boom|crash/, { minLot: 0.2 }],
+    [/step/, { minLot: 0.1, contract: 10, pts: 0.1 }], [/jump|range break|drift|dex/, { minLot: 0.01 }]
+  ];
+  const SPREAD_PCT = { volatility: 0.0001, boom: 0.0003, crash: 0.0003, jump: 0.0001, step: 0, range: 0.0001, drift: 0.0001, other: 0.0002 };
+  // Multipliers on Deriv Trader: $1 minimum stake, commission = rate x stake x multiplier, at least $0.10
+  const MULT_RATE = { boom: 0.0002, crash: 0.0002, other: 0.00036 };
+
+  function spec(sym, name, price, over) {
+    const n = String(name || '').toLowerCase(), fam = family(sym, name);
+    const hit = (SPECS.find(([re]) => re.test(n)) || [null, {}])[1];
+    const o = (over && over[sym]) || {};
+    const minLot = o.minLot > 0 ? o.minLot : hit.minLot || 0.01;
+    const contract = o.contract > 0 ? o.contract : hit.contract || 1;
+    const spreadPts = o.spread >= 0 && o.spread !== '' && o.spread !== null && o.spread !== undefined ? +o.spread
+      : hit.pts !== undefined ? hit.pts : (price || 0) * (SPREAD_PCT[fam] ?? SPREAD_PCT.other);
+    return { minLot, contract, spread: spreadPts, multRate: MULT_RATE[fam] || MULT_RATE.other, custom: !!(over && over[sym]) };
+  }
+
+  // Position size for a balance and risk percent. Lots = risk / (stop distance x contract size).
+  function sizing(p, balance, riskPct, sp) {
     if (!p || !(balance > 0) || !(riskPct > 0)) return null;
-    const risk = balance * riskPct / 100;
-    return { risk, lots: risk / p.dist };
+    const risk = balance * riskPct / 100, contract = (sp && sp.contract) || 1;
+    const lots = risk / (p.dist * contract);
+    const minLot = sp && sp.minLot, minRisk = minLot ? minLot * contract * p.dist : null;
+    return { risk, lots, minLot, minRisk, fits: !minLot || lots >= minLot };
   }
 
-  // Simulate one trade from candle i: exits at stop, TP1, or after maxHold candles
-  function simulate(S, i, p, maxHold) {
+  // Deriv Trader Multipliers plan for one trade: stake, multiplier and dollar stop and targets.
+  function multiplierPlan(p, riskUsd, sp, minStake = 1) {
+    if (!p || !(riskUsd > 0)) return null;
+    const stake = Math.max(minStake, Math.ceil(riskUsd * 100) / 100);
+    const notional = riskUsd * p.entry / p.dist; // stake x multiplier that makes the price stop cost riskUsd
+    const mult = notional / stake;
+    const commission = Math.max(0.1, ((sp && sp.multRate) || MULT_RATE.other) * notional);
+    return { stake, mult, notional, slUsd: riskUsd, tp1Usd: riskUsd * p.tp1R, tp2Usd: riskUsd * p.tp2R, commission, costR: commission / riskUsd };
+  }
+
+  // Simulate one trade from candle i: exits at stop, TP1, the strategy's exit rule, or after maxHold candles
+  function simulate(S, i, p, maxHold, exitFn) {
     const last = Math.min(S.n - 1, i + maxHold);
     for (let j = i + 1; j <= last; j++) {
       const o = S.open[j], hi = S.high[j], lo = S.low[j];
@@ -316,34 +496,43 @@
         if (hi >= p.sl) return { j, exit: p.sl, how: 'sl' };
         if (lo <= p.tp1) return { j, exit: p.tp1, how: 'tp' };
       }
+      if (exitFn && exitFn(S, j, p.dir)) return { j, exit: S.close[j], how: 'rule' };
     }
     return { j: last, exit: S.close[last], how: 'time' };
   }
 
-  /* What random entries earn with the same stops and targets. This is the chance
-     level each strategy has to beat, and it captures drift on Boom and Crash. */
-  function baseline(S, maxHold) {
-    const key = 'base' + maxHold;
-    if (S[key]) return S[key];
+  // R of a trade after costs: the spread is paid once per round trip, costR is any fixed fee in R
+  const netR = (dir, exit, p, cost) => dir * (exit - p.entry) / p.dist - (cost.spread || 0) / p.dist - (cost.costR || 0);
+
+  /* What random entries earn with the same stops, targets, exit rule and costs. This is the
+     chance level each strategy has to beat, and it captures drift on Boom and Crash. */
+  function baseline(S, maxHold, mode, cost = {}, strat) {
+    const exitFn = strat && strat.exit ? strat.exit.bind(strat) : null;
+    const key = ['base', maxHold, mode || 'swing', cost.spread || 0, cost.costR || 0, exitFn ? strat.id : ''].join('|');
+    S.bases = S.bases || {};
+    if (S.bases[key]) return S.bases[key];
     const out = {};
     for (const dir of [1, -1]) {
       let sum = 0, n = 0, wins = 0;
       for (let i = WARMUP; i < S.n - 2; i += 3) {
-        const p = plan(S, i, dir); if (!p) continue;
-        const r = simulate(S, i, p, maxHold);
-        const R = dir * (r.exit - p.entry) / p.dist;
+        const p = plan(S, i, dir, undefined, mode); if (!p) continue;
+        const r = simulate(S, i, p, maxHold, exitFn);
+        const R = netR(dir, r.exit, p, cost);
         sum += R; n++; if (R > 0) wins++;
       }
       out[dir] = n ? { R: sum / n, win: wins / n, n } : { R: 0, win: 0, n: 0 };
     }
-    S[key] = out;
+    S.bases[key] = out;
     return out;
   }
 
   function backtest(S, strat, opts = {}) {
-    const fam = opts.family || 'other', spikeOnly = opts.spikeOnly !== false, maxHold = opts.maxHold || 50;
+    const fam = opts.family || 'other', spikeOnly = opts.spikeOnly !== false;
+    const mode = opts.mode || modeOf(strat.id), maxHold = opts.maxHold || modeCfg(mode).maxHold;
+    const cost = { spread: opts.spread || 0, costR: opts.costR || 0 };
     if (S.n < WARMUP + 30) return null;
-    const base = baseline(S, maxHold);
+    const exitFn = strat.exit ? strat.exit.bind(strat) : null;
+    const base = baseline(S, maxHold, mode, cost, strat);
     // Chance = a coin-flip trader allowed the same directions (only buys on Boom, only sells on Crash)
     const dirs = [1, -1].filter(d => allowed(fam, d, spikeOnly));
     const chance = { R: dirs.reduce((s, d) => s + base[d].R, 0) / dirs.length, win: dirs.reduce((s, d) => s + base[d].win, 0) / dirs.length };
@@ -351,10 +540,10 @@
     for (let i = WARMUP; i < S.n - 2; i++) {
       const d = strat.event(S, i);
       if (!d || !allowed(fam, d, spikeOnly)) continue;
-      const p = plan(S, i, d); if (!p) continue;
-      const r = simulate(S, i, p, maxHold);
-      const R = d * (r.exit - p.entry) / p.dist;
-      trades.push({ i, j: r.j, dir: d, R, how: r.how, base: chance.R });
+      const p = plan(S, i, d, undefined, mode); if (!p) continue;
+      const r = simulate(S, i, p, maxHold, exitFn);
+      const R = netR(d, r.exit, p, cost);
+      trades.push({ i, j: r.j, dir: d, R, how: r.how, base: chance.R, hold: r.j - i });
       i = r.j; // no overlapping trades
     }
     const N = trades.length;
@@ -372,8 +561,12 @@
       strategy: strat.id, name: strat.name, group: strat.group, trades: N, wins,
       winRate: N ? wins / N : 0, baseWin, avgR, baseR, edge, z, totalR: Rs.reduce((s, x) => s + x, 0),
       half1: half(trades.filter(t => t.i < mid)), half2: half(trades.filter(t => t.i >= mid)),
-      gaps: trades.filter(t => t.how === 'gap').length, candles: S.n
+      gaps: trades.filter(t => t.how === 'gap').length, candles: S.n, mode, maxHold,
+      Rs, avgHold: mean(trades.map(t => t.hold)),
+      avgWin: wins ? mean(Rs.filter(x => x > 0)) : 0, avgLoss: N - wins ? mean(Rs.filter(x => x <= 0)) : 0
     };
+    // win rate needed to break even with this strategy's average win and loss
+    res.breakevenWin = res.avgWin > 0 && res.avgLoss < 0 ? -res.avgLoss / (res.avgWin - res.avgLoss) : null;
     res.verdict = verdict(res);
     res.score = edgeScore(res);
     return res;
@@ -433,7 +626,7 @@
   // Rank every strategy for this market, best first. Scores are corrected for
   // choosing among all strategies, so a lucky winner on random data stays low.
   function recommend(S, opts = {}) {
-    const lib = library(opts.threshold || 50);
+    const lib = library(opts.threshold || 50, opts.mode || 'swing');
     const famBoost = st => (st.bestFor || []).includes(opts.family) ? 1 : 0;
     return lib.map(st => backtest(S, st, opts)).filter(Boolean).map(r => {
       r.zAdj = Math.max(-10, Math.min(50, adjustZ(r.z, lib.length)));
@@ -454,7 +647,7 @@
     const active = lastDir && barsAgo !== null && barsAgo <= fresh ? lastDir : 0;
     return {
       state: allowed(fam, st, spikeOnly) ? st : 0, active, lastDir, barsAgo,
-      plan: active ? plan(S, i, active, S.close[S.n - 1]) : null,
+      plan: active ? plan(S, i, active, S.close[S.n - 1], opts.mode || modeOf(strat.id)) : null,
       reading: strat.reading(S, i)
     };
   }
@@ -473,10 +666,46 @@
     return out;
   }
 
+  /* Backtest trade results with the luck of picking the winner taken out: the edge over
+     chance is shrunk by the same share the best-of-many correction took off z. */
+  function honestRs(r) {
+    if (!r || !r.Rs || !r.Rs.length) return [];
+    let shift = 0;
+    if (r.z > 0 && r.zAdj !== undefined && r.zAdj < r.z) shift = r.edge * (1 - Math.max(0, r.zAdj) / r.z);
+    return r.Rs.map(x => x - Math.max(0, shift));
+  }
+
+  /* Monte Carlo of an account trading one strategy. Each trade risks riskPct of the balance
+     (or of the ladder step reached), never less than minRisk(balance), and pays cost(risk) in R.
+     The run ends at the target, when the balance can no longer cover the smallest trade, or after maxTrades. */
+  function growthSim(o) {
+    const Rs = o.Rs || [], trials = o.trials || 2000, maxTrades = o.maxTrades || 300;
+    if (!Rs.length) return null;
+    const steps = (o.ladder || []).slice().sort((a, b) => a - b);
+    const minRisk = o.minRisk || (() => 0);
+    let seed = o.seed || 7; const rnd = () => (seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296;
+    let hit = 0, bust = 0; const lens = [], ends = [];
+    for (let t = 0; t < trials; t++) {
+      let bal = o.start, n = 0, done = false;
+      while (n < maxTrades) {
+        const base = steps.length ? (steps.filter(s => s <= bal).pop() || bal) : bal;
+        const risk = Math.max(base * o.riskPct / 100, minRisk(bal));
+        if (!(risk > 0) || risk > bal || bal < (o.floor || 0)) { bust++; done = true; break; }
+        bal += risk * (Rs[Math.floor(rnd() * Rs.length)] - (o.cost ? o.cost(risk) : 0));
+        n++;
+        if (bal >= o.target) { hit++; done = true; break; }
+      }
+      if (!done && bal <= 0) bust++;
+      lens.push(n); ends.push(bal);
+    }
+    const med = a => { const s = a.slice().sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
+    return { pTarget: hit / trials, pBust: bust / trials, pNeither: 1 - (hit + bust) / trials, medianTrades: med(lens), medianEnd: med(ends) };
+  }
+
   const api = {
-    WARMUP, MIN_TRADES, TP1_R, TP2_R, PRESETS, CLASSIC, FAMILY_LABEL,
-    family, allowed, compute, library, byId, regime, score, plan, sizing, simulate, baseline,
-    backtest, recommend, live, snapshot, events, edgeScore, scoreLabel, adjustZ, normCdf
+    WARMUP, MIN_TRADES, TP1_R, TP2_R, PRESETS, CLASSIC, SCALP, MODES, FAMILY_LABEL,
+    family, allowed, compute, library, byId, modeOf, regime, score, plan, spec, sizing, multiplierPlan, simulate, baseline,
+    backtest, recommend, live, snapshot, events, edgeScore, scoreLabel, adjustZ, normCdf, honestRs, growthSim
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.Strat = api;
