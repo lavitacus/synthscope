@@ -1,5 +1,5 @@
-// SynthScope engine tests: indicator maths against a reference library,
-// trade plans, the plan-based backtester and live recommendations.
+// SynthScope engine tests: indicator maths against a reference library, trade plans,
+// the plan-based backtester, scalper mode, costs, lot and Multiplier sizing and the account simulator.
 const Ind = require('../www/js/indicators.js');
 global.Ind = Ind;
 const Strat = require('../www/js/strategies.js');
@@ -101,6 +101,40 @@ let promising = 0, strong = 0; const M = 120;
 for (let k = 0; k < M; k++) { const s = Strat.recommend(Strat.compute(walk(1000)), { family: 'volatility' })[0].score; if (s >= 65) promising++; if (s >= 85) strong++; }
 check(promising / M <= 0.08 && strong / M <= 0.02, `best-of-13 on random data: ${(promising / M * 100).toFixed(1)}% Promising, ${(strong / M * 100).toFixed(1)}% Strong`);
 check(Strat.adjustZ(4, 13) < 4 && Strat.adjustZ(4, 13) > 3, 'correction shrinks z=4 to ' + Strat.adjustZ(4, 13).toFixed(2));
+
+// ---- scalper mode ----
+check(Strat.library(50, 'scalp').length === 6 && Strat.SCALP.every(s => Strat.modeOf(s.id) === 'scalp'), 'scalper library has 6 strategies');
+const sp = Strat.plan(S0, 400, 1, undefined, 'scalp');
+check(near(sp.tp1 - sp.entry, sp.entry - sp.sl) && near(sp.tp2 - sp.entry, 2 * (sp.entry - sp.sl)) && sp.dist <= 2 * sp.atr + 1e-9, 'scalp plan: TP1 1R, TP2 2R, stop within 2 ATR');
+let sProm = 0, sStrong = 0; const SM = 120;
+for (let k = 0; k < SM; k++) { const s = Strat.recommend(Strat.compute(walk(2000)), { family: 'volatility', mode: 'scalp' })[0].score; if (s >= 65) sProm++; if (s >= 85) sStrong++; }
+check(sProm / SM <= 0.09 && sStrong / SM <= 0.03, `best-of-6 scalper on random data: ${(sProm / SM * 100).toFixed(1)}% Promising, ${(sStrong / SM * 100).toFixed(1)}% Strong`);
+const sTrend = Strat.recommend(Strat.compute(walk(2000, 1000, 1, null, 0.25)), { family: 'volatility', mode: 'scalp' })[0];
+check(sTrend.score >= 65 && sTrend.avgR > 0, 'scalper finds a planted trend: ' + sTrend.name + ' scores ' + sTrend.score);
+
+// ---- costs ----
+const Sc = Strat.compute(walk(2000)), st0 = Strat.byId('ema_cross');
+const free = Strat.backtest(Sc, st0, { family: 'volatility' }), paid = Strat.backtest(Sc, st0, { family: 'volatility', spread: 0.5 });
+check(paid.avgR < free.avgR && paid.baseR < free.baseR, 'spread lowers both the strategy and the chance level');
+const rs = Strat.recommend(Sc, { family: 'volatility', mode: 'scalp', spread: 0.5 });
+check(rs.every(r => r.verdict.code !== 'edge'), 'random walk with spread: no scalper edge');
+
+// ---- lots, minimum lot and Multipliers ----
+const v75 = Strat.spec('R_75', 'Volatility 75 Index', 400000), stp = Strat.spec('stpRNG', 'Step Index', 8000);
+check(v75.minLot === 0.01 && v75.contract === 1 && v75.spread > 0 && stp.contract === 10 && stp.spread === 0.1, 'spec estimates for V75 and Step');
+check(Strat.spec('R_75', 'Volatility 75 Index', 400000, { R_75: { minLot: 0.001, spread: 30 } }).minLot === 0.001, 'spec overrides win');
+const pz = { dist: 500, entry: 400000, dir: 1, tp1R: 1, tp2R: 2 }, z10 = Strat.sizing(pz, 10, 2, v75);
+check(near(z10.risk, 0.2) && !z10.fits && near(z10.minRisk, 5), '$10 at 2% cannot afford 0.01 lots of a 500 point stop');
+const mp = Strat.multiplierPlan(pz, 0.5, v75);
+check(mp.stake === 1 && near(mp.notional, 400) && near(mp.mult, 400) && near(mp.commission, 0.144) && near(mp.slUsd, 0.5), 'multiplier plan: $1 stake, x400, $0.14 commission');
+const mp2 = Strat.multiplierPlan(Object.assign({}, pz, { dist: 5000 }), 0.2, v75);
+check(near(mp2.commission, 0.1) && near(mp2.costR, 0.5), 'multiplier commission floor of $0.10 is half of a $0.20 risk');
+
+// ---- account simulation ----
+const allWin = Strat.growthSim({ Rs: [1], start: 10, riskPct: 5, target: 20, trials: 50 }), allLose = Strat.growthSim({ Rs: [-1], start: 10, riskPct: 5, target: 20, trials: 50, floor: 1 });
+check(allWin.pTarget === 1 && allLose.pBust === 1, 'growth sim: always winning reaches the goal, always losing busts');
+const coin = Strat.growthSim({ Rs: [1, -1], start: 10, riskPct: 5, target: 20, trials: 3000, maxTrades: 2000, floor: 2, cost: () => 0.1 });
+check(coin.pTarget < 0.5, 'growth sim: a coin flip with costs reaches double less than half the time (' + (coin.pTarget * 100).toFixed(0) + '%)');
 
 if (failed) { console.log('\n' + failed + ' check(s) failed'); process.exit(1); }
 console.log('\nAll checks passed');

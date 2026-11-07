@@ -1,6 +1,7 @@
 /* SynthScope 24/7 scanner for GitHub Actions.
    Each run: loads every Vixed index on the chosen timeframes from Deriv's public feed,
-   ranks all 13 strategies per market with the same engine as the app, sends an ntfy
+   ranks the 13 regular strategies per market with the same engine as the app (spread
+   included; Scalper mode stays in the app because Actions runs late), sends an ntfy
    alert for each fresh signal from a strategy that clears MIN_SCORE, and follows every
    alert until it hits the stop, TP1 or the max hold. State is kept between runs in
    scan-state.json (saved by the workflow's cache step). No packages needed. */
@@ -107,7 +108,9 @@ async function main(env = process.env, deps = {}) {
       candlesByKey.set(s.symbol + '|' + g, cs);
       if (cs.length < Strat.WARMUP + 40) continue;
       const S = Strat.compute(cs);
-      const opts = { family: s.fam, spikeOnly: cfg.spikeOnly, maxHold: cfg.maxHold };
+      // regular mode; every backtest pays the market's estimated MT5 spread
+      const sp = Strat.spec(s.symbol, s.name, cs[cs.length - 1].close);
+      const opts = { family: s.fam, spikeOnly: cfg.spikeOnly, maxHold: cfg.maxHold, mode: 'swing', spread: sp.spread };
       const rec = Strat.recommend(S, opts);
       const best = rec[0];
       results.push({ sym: s.symbol, g, best });
@@ -121,7 +124,7 @@ async function main(env = process.env, deps = {}) {
         if (now / 1000 - signalClose > cfg.freshMinutes * 60 + g) continue;
         const key = `${s.symbol}|${g}|${r.strategy}|${S.time[k]}`;
         if (st.seen[key]) break;
-        fresh.push({ key, s, g, r, L, signalClose });
+        fresh.push({ key, s, g, r, L, signalClose, sp });
         break;
       }
     }
@@ -144,14 +147,15 @@ async function main(env = process.env, deps = {}) {
   fresh.sort((a, b) => b.r.score - a.r.score);
   const sent = [];
   for (const f of fresh.slice(0, cfg.maxAlerts)) {
-    const { s, g, r, L } = f, p = L.plan, sz = Strat.sizing(p, cfg.balance, cfg.riskPct);
+    const { s, g, r, L } = f, p = L.plan, sz = Strat.sizing(p, cfg.balance, cfg.riskPct, f.sp);
     const title = `${word(L.active)} ${s.name} (${TF_LABEL[g]}) edge ${r.score}`;
     const body = [
       `Entry ${fmtPrice(p.entry, s.pip)}`,
       `Stop loss ${fmtPrice(p.sl, s.pip)}`,
       `TP1 ${fmtPrice(p.tp1, s.pip)}  |  TP2 ${fmtPrice(p.tp2, s.pip)}`,
       sz ? `Risk $${sz.risk.toFixed(2)} (${cfg.riskPct}% of $${cfg.balance})  |  ${sz.lots < 0.01 ? sz.lots.toPrecision(2) : sz.lots.toFixed(3)} MT5 lots` : '',
-      `${r.name}: ${r.trades} past trades, ${(r.winRate * 100).toFixed(0)}% win, ${r.avgR >= 0 ? '+' : ''}${r.avgR.toFixed(2)}R avg`,
+      sz && !sz.fits ? `Min lot ${sz.minLot} risks $${sz.minRisk.toFixed(2)} here, more than your plan.` : '',
+      `${r.name}: ${r.trades} past trades, ${(r.winRate * 100).toFixed(0)}% win, ${r.avgR >= 0 ? '+' : ''}${r.avgR.toFixed(2)}R avg after spread`,
       (s.fam === 'boom' || s.fam === 'crash') ? 'Spikes can jump past a stop loss. Size small.' : '',
       `Signal ${Math.max(0, Math.round((now / 1000 - f.signalClose) / 60))} min ago. Check the live price before entering.`
     ].filter(Boolean).join('\n');
